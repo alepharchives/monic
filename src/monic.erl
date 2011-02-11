@@ -1,98 +1,33 @@
+% Copyright 2011 Cloudant
+%
+% Licensed under the Apache License, Version 2.0 (the "License"); you may not
+% use this file except in compliance with the License. You may obtain a copy of
+% the License at
+%
+%   http://www.apache.org/licenses/LICENSE-2.0
+%
+% Unless required by applicable law or agreed to in writing, software
+% distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+% WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+% License for the specific language governing permissions and limitations under
+% the License.
+
 -module(monic).
--behavior(gen_server).
--include("monic.hrl").
+-export([start/0, stop/0, read/1, write/3, delete/1]).
 
-% public API
--export([start_link/1, start_link/2, close/1, write/2, read/2]).
+start() ->
+    application:start(monic).
 
-% gen_server API
--export([init/1, terminate/2, code_change/3,handle_call/3, handle_cast/2, handle_info/2]).
+stop() ->
+    application:stop(monic).
 
--record(state, {
-          busy=[],
-          idle=[],
-          requests=[]}).
+read(Handle) ->
+    gen_server:call(monic_server, {read, Handle}, infinity).
 
-% public functions
+write(Group, Key, Bin) when is_binary(Bin) ->
+    gen_server:call(monic_server, {write, Group, Key, Bin}, infinity);
+write(Group, Key, Fun) when is_function(Fun) ->
+    gen_server:call(monic_server, {write, Group, Key, Fun}, infinity).
 
-start_link(Name) ->
-    start_link(Name, []).
-
-start_link(Name, Options) ->
-    gen_server:start_link({local, list_to_atom(Name)}, ?MODULE, [Name, Options], []).
-
-close(Pid) ->
-    gen_server:call(Pid, close, infinity).
-
-write(Pid, Bin) when is_binary(Bin) ->
-    gen_server:call(Pid, {write, Bin}, infinity).
-
-read(Pid, Handle) ->
-    gen_server:call(Pid, {read, Handle}, infinity).
-
-% gen_server functions
-
-init([Name, Options]) ->
-    State = init_workers(Name, Options),
-    {ok, State}.
-
-handle_call({read, #handle{path=Path}}=Request, From, #state{idle=Idle}=State)->
-    case lists:partition(fun({Path1, _}) -> Path1 == Path end, Idle) of
-        {[], _} ->
-            {noreply, State#state{requests=[{Request, From} | State#state.requests]}};
-        {[W], Rest} ->
-            monic_worker:start_work(W, {Request, From}),
-            {noreply, State#state{idle=Rest,busy=[W|State#state.busy]}}
-    end;
-handle_call({write, _Bin}=Request, From, #state{idle=Idle}=State) ->
-    case Idle of
-        [] ->
-            {noreply, State#state{requests=[{Request, From} | State#state.requests]}};
-        [W|Rest] ->
-            monic_worker:start_work(W, {Request, From}),
-            {noreply, State#state{idle=Rest,busy=[W|State#state.busy]}}
-    end;
-handle_call(close, _From, State) ->
-    shutdown_workers(State),
-    {stop, normal, ok, State}.
-
-handle_cast({done, Worker, From, Resp}, #state{requests=[]}=State) ->
-    Busy = [B || B <- State#state.busy, B /= Worker],
-    Idle = State#state.idle ++ [Worker],
-    gen_server:reply(From, Resp),
-    {noreply, State#state{idle=Idle, busy=Busy}};
-handle_cast({done, {_, Pid}, From, Resp}, #state{requests=[R|Rest]}=State) ->
-    gen_server:reply(From, Resp),
-    monic_worker:start_work(Pid, R),
-    {noreply, State#state{requests=Rest}}.
-
-handle_info(_Info, State) ->
-    {noreply, State}.
-
-terminate(_Reason, State) ->
-    shutdown_workers(State),
-    ok.
-
-code_change(_OldVsn, State, _Extra) ->
-  {ok, State}.
-
-% private functions
-
-init_workers(Name, Options) ->
-    Max = get_value(max, Options, 1),
-    Workers = lists:map(fun(N) ->
-                                Path = filename:join(Name, integer_to_list(N)),
-                                {ok, Worker} = monic_worker:start_link(self(), Path),
-                                Worker end, lists:seq(1, Max)),
-    #state{idle=Workers}.
-
-shutdown_workers(#state{busy=Busy,idle=Idle}) ->
-    lists:foreach(fun(Worker) -> monic_worker:close(Worker) end,
-                  Busy ++ Idle),
-    ok.
-
-get_value(Key, Props, Default) ->
-    case lists:keyfind(Key, 1, Props) of
-        false -> Default;
-        {_, Value} -> Value
-    end.
+delete(Handle) ->
+    gen_server:call(monic_server, {delete, Handle}, infinity).

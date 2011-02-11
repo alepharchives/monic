@@ -15,10 +15,19 @@
 -module(monic_test).
 -include_lib("eunit/include/eunit.hrl").
 
-basic_test() ->
-    {ok, Pid} = monic:start_link("foo", [{max, 5}]),
+basic_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun write_read/1}.
+
+setup() ->
+    monic:start().
+
+cleanup(_) ->
+    monic:stop().
+
+write_read(_) ->
+    Group = "foo",
+    Key = "bar",
     Bin = <<"hello this is a quick test">>,
-    {ok, Handle} = monic:write(Pid, Bin),
-    {ok, Bin1} = monic:read(Pid, Handle),
-    ?assertEqual(Bin, Bin1),
-    ok = monic:close(Pid).
+    {ok, Handle} = monic:write(Group, Key, Bin),
+    {ok, Bin1} = monic:read(Handle),
+    ?assertEqual(Bin, Bin1).

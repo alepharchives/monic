@@ -23,5 +23,5 @@
                   crypto
                  ]},
   {mod, { monic_app, []}},
-  {env, []}
+  {env, [{"rootdir","tmp"}]}
  ]}.
